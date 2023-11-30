@@ -1,11 +1,12 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Diagnostics;
 
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-exitwindowsex
 
-public enum ShutdownType : uint {
+public enum ShutdownType : uint
+{
     HybridShutdown = 0x00400000,
     LogOff = 0x00,
     PowerOff = 0x00000008,
@@ -19,7 +20,8 @@ public enum ShutdownType : uint {
 
 // https://learn.microsoft.com/en-us/windows/win32/shutdown/system-shutdown-reason-codes
 
-public enum ShutdownReason : uint {
+public enum ShutdownReason : uint
+{
     MajorApplication = 0x00040000,
     MajorHardware = 0x00010000,
     MajorLegacyAPI = 0x00070000,
@@ -63,7 +65,8 @@ public enum ShutdownReason : uint {
 
 // https://stackoverflow.com/questions/24726116/when-using-exitwindowsex-logoff-works-but-shutdown-and-restart-do-not
 
-public sealed class TokenAdjuster {
+public sealed class TokenAdjuster
+{
     private const int SE_PRIVILEGE_ENABLED = 0x00000002;
     private const int TOKEN_ADJUST_PRIVILEGES = 0X00000020;
     private const int TOKEN_QUERY = 0X00000008;
@@ -83,7 +86,8 @@ public sealed class TokenAdjuster {
     [DllImport("advapi32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool LookupPrivilegeValue(string lpSystemName, string lpName, ref LUID lpLuid);
 
-    public static bool EnablePrivilege(string lpszPrivilege, bool bEnablePrivilege){
+    public static bool EnablePrivilege(string lpszPrivilege, bool bEnablePrivilege)
+    {
         bool retval = false;
         int ltkpOld = 0;
         IntPtr hToken = IntPtr.Zero;
@@ -98,17 +102,23 @@ public sealed class TokenAdjuster {
 
         tkp.PrivilegeCount = 1;
 
-        if(bEnablePrivilege){
+        if (bEnablePrivilege)
+        {
             tkp.Privileges[2] = SE_PRIVILEGE_ENABLED;
-        } else {
+        }
+        else
+        {
             tkp.Privileges[2] = 0;
         }
 
-        if(LookupPrivilegeValue(null, lpszPrivilege, ref tLUID)){
+        if (LookupPrivilegeValue(null, lpszPrivilege, ref tLUID))
+        {
             Process proc = Process.GetCurrentProcess();
 
-            if(proc.Handle != IntPtr.Zero){
-                if(OpenProcessToken(proc.Handle, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ref hToken) != 0){
+            if (proc.Handle != IntPtr.Zero)
+            {
+                if (OpenProcessToken(proc.Handle, TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, ref hToken) != 0)
+                {
                     tkp.PrivilegeCount = 1;
                     tkp.Privileges[2] = SE_PRIVILEGE_ENABLED;
                     tkp.Privileges[1] = tLUID.HighPart;
@@ -119,8 +129,10 @@ public sealed class TokenAdjuster {
 
                     Marshal.StructureToPtr(tkp, tu, true);
 
-                    if(AdjustTokenPrivileges(hToken, 0, tu, bufLength, IntPtr.Zero, ref ltkpOld) != 0){
-                        if(Marshal.GetLastWin32Error() == 0){
+                    if (AdjustTokenPrivileges(hToken, 0, tu, bufLength, IntPtr.Zero, ref ltkpOld) != 0)
+                    {
+                        if (Marshal.GetLastWin32Error() == 0)
+                        {
                             retval = true;
                         }
                     }
@@ -131,7 +143,8 @@ public sealed class TokenAdjuster {
             }
         }
 
-        if(hToken != IntPtr.Zero){
+        if (hToken != IntPtr.Zero)
+        {
             CloseHandle(hToken);
         }
 
@@ -139,26 +152,30 @@ public sealed class TokenAdjuster {
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct LUID {
+    internal struct LUID
+    {
         internal int LowPart;
         internal int HighPart;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct LUID_AND_ATTRIBUTES {
+    private struct LUID_AND_ATTRIBUTES
+    {
         private LUID Luid;
         private int Attributes;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct TOKEN_PRIVILEGES {
+    internal struct TOKEN_PRIVILEGES
+    {
         internal int PrivilegeCount;
         [MarshalAs(UnmanagedType.ByValArray, SizeConst = 3)]
         internal int[] Privileges;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct _PRIVILEGE_SET {
+    private struct _PRIVILEGE_SET
+    {
         private int PrivilegeCount;
         private int Control;
 
@@ -167,13 +184,17 @@ public sealed class TokenAdjuster {
     }
 }
 
-namespace PowerManagement {
-    public static class PowerUtilities {
+namespace PowerManagement
+{
+    public static class PowerUtilities
+    {
         [DllImport("user32.dll", SetLastError = true)]
         private static extern int ExitWindowsEx(ShutdownType uFlags, ShutdownReason dwReason);
 
-        public static bool ExitWindows(ShutdownType shutdownType, ShutdownReason shutdownReason, bool ajustToken){
-            if(ajustToken && !TokenAdjuster.EnablePrivilege("SeShutdownPrivilege", true)){
+        public static bool ExitWindows(ShutdownType shutdownType, ShutdownReason shutdownReason, bool ajustToken)
+        {
+            if (ajustToken && !TokenAdjuster.EnablePrivilege("SeShutdownPrivilege", true))
+            {
                 return false;
             }
 
