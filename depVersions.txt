@@ -1,0 +1,2 @@
+[DLL] OpenHardwareMonitorLib.dll - 0.9.6.0
+[DEP, nuget.org] Microsoft.Toolkit.Uwp.Notifications - 7.1.3
