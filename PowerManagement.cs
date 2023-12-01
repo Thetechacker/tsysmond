@@ -68,10 +68,10 @@ public enum ShutdownReason : uint
 public sealed class TokenAdjuster
 {
     private const int SE_PRIVILEGE_ENABLED = 0x00000002;
-    private const int TOKEN_ADJUST_PRIVILEGES = 0X00000020;
-    private const int TOKEN_QUERY = 0X00000008;
-    private const int TOKEN_ALL_ACCESS = 0X001f01ff;
-    private const int PROCESS_QUERY_INFORMATION = 0X00000400;
+    private const int TOKEN_ADJUST_PRIVILEGES = 0x00000020;
+    private const int TOKEN_QUERY = 0x00000008;
+    private const int TOKEN_ALL_ACCESS = 0x001F01FF;
+    private const int PROCESS_QUERY_INFORMATION = 0x00000400;
 
     [DllImport("advapi32", SetLastError = true), SuppressUnmanagedCodeSecurity]
     private static extern int OpenProcessToken(IntPtr ProcessHandle, int DesiredAccess, ref IntPtr TokenHandle);
