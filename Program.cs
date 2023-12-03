@@ -209,7 +209,7 @@ namespace TexSystemMonitor
                     {
                         try
                         {
-                            File.Create(CPU_TEMPERATURE_SHUTDOWN_LOCKFILE);
+                            File.Create(CPU_TEMPERATURE_SHUTDOWN_LOCKFILE); // Flag
                         }
                         catch (Exception err)
                         {
