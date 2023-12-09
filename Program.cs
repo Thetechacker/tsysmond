@@ -113,7 +113,7 @@ namespace TexSystemMonitor
         public static Func<threadfn>[] threadFuncs = new Func<threadfn>[] { cpuTempSafetyMeasure, powerSupplySwitchAlerter };
 
         public const string optionArgumentPrefix = "--";
-        public static readonly string[] optionArguments = { "console", "enableTelemetry" };
+        public static readonly string[] optionArguments = { "console", "collectSystemData" };
 
         public static DateTime? daemonStartedAt = null;
 
@@ -122,7 +122,7 @@ namespace TexSystemMonitor
 
         public static readonly RegistryDefaultValue[] registryDefaultValues = {
             new RegistryDefaultValue { Name = "CPUTempSafeStartup", Kind = RegistryValueKind.DWord, DefaultValue = 0x00000000, ValueChecker = null },
-            new RegistryDefaultValue { Name = "TelemetryFileLocation", Kind = RegistryValueKind.String, DefaultValue = @"C:\Tex\telemetry.txt", ValueChecker = null }
+            new RegistryDefaultValue { Name = "SystemDataColFileLocation", Kind = RegistryValueKind.String, DefaultValue = @"C:\Tex\systemDataCol.txt", ValueChecker = null }
         };
 
         public static ManualResetEvent exitEvent = null;
@@ -317,21 +317,21 @@ namespace TexSystemMonitor
             return 0;
         }
 
-        public static threadfn telemetryThread()
+        public static threadfn systemDataCollector()
         {
             string THREAD_NAME = MethodBase.GetCurrentMethod().Name;
 
-            if (!createMissingDirectories((string)registryValuesSnapshot["TelemetryFileLocation"]))
+            if (!createMissingDirectories((string)registryValuesSnapshot["SystemDataColFileLocation"]))
             {
-                sendNotification(DAEMON_NAME, $"Couldn't create the missing directories for the telemetry file: \"{(string)registryValuesSnapshot["TelemetryFileLocation"]}\"", THREAD_NAME, true);
+                sendNotification(DAEMON_NAME, $"Couldn't create the missing directories for the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"", THREAD_NAME, true);
             }
 
             try
             {
-                File.AppendAllText((string)registryValuesSnapshot["TelemetryFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
+                File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
             } catch(Exception exc)
             {
-                sendNotification(DAEMON_NAME, $"Couldn't write or append data to the telemetry file: \"{(string)registryValuesSnapshot["TelemetryFileLocation"]}\"\n\"{exc.Message}\"");
+                sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"", THREAD_NAME, true);
 
                 return 0;
             }
@@ -347,10 +347,10 @@ namespace TexSystemMonitor
 
             // try
             // {
-            //     File.AppendAllText((string)registryValuesSnapshot["TelemetryFileLocation"], prevEntries);
+            //     File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], prevEntries);
             // } catch(Exception exc)
             // {
-            //     sendNotification(DAEMON_NAME, $"Couldn't write or append data to the telemetry file: \"{(string)registryValuesSnapshot["TelemetryFileLocation"]}\"\n\"{exc.Message}\"");
+            //     sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"", THREAD_NAME, true);
 
             //     return 0;
             // }
@@ -364,12 +364,12 @@ namespace TexSystemMonitor
 
                 try
                 {
-                    if(!File.Exists((string)registryValuesSnapshot["TelemetryFileLocation"])) File.AppendAllText((string)registryValuesSnapshot["TelemetryFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
+                    if(!File.Exists((string)registryValuesSnapshot["SystemDataColFileLocation"])) File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
 
-                    File.AppendAllText((string)registryValuesSnapshot["TelemetryFileLocation"], $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"\n");
+                    File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"\n");
                 } catch(Exception exc)
                 {
-                    sendNotification(DAEMON_NAME, $"Couldn't write or append data to the telemetry file: \"{(string)registryValuesSnapshot["TelemetryFileLocation"]}\"\n\"{exc.Message}\"\nPerpetually suspending thread...");
+                    sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"\nPerpetually suspending thread...", THREAD_NAME, true);
 
                     suspensionCleanup = true;
 
@@ -457,7 +457,7 @@ namespace TexSystemMonitor
 
             if(registry == null)
             {
-                sendNotification(DAEMON_NAME, "Couldn't create or open the registry.");
+                sendNotification(DAEMON_NAME, "Couldn't create or open the registry.", displayDateTime: true);
 
                 goto mainExit;
             }
@@ -522,15 +522,15 @@ namespace TexSystemMonitor
             registryException:
                 if (registryException != null)
                 {
-                    sendNotification(DAEMON_NAME, $"Couldn't manage the registry: \"{registryException.Message}\", exiting from Main() function.");
+                    sendNotification(DAEMON_NAME, $"Couldn't manage the registry: \"{registryException.Message}\", exiting from Main() function.", displayDateTime: true);
 
                     goto mutexExit;
                 }
             }
 
-            bool enableTelemetry = args.Any(argument => argument == (optionArgumentPrefix + "enableTelemetry"));
+            bool collectSystemData = args.Any(argument => argument == (optionArgumentPrefix + "collectSystemData"));
 
-            if (enableTelemetry && !threadFuncs.Any(func => func == telemetryThread)) threadFuncs = threadFuncs.Prepend(telemetryThread).ToArray();
+            if (collectSystemData && !threadFuncs.Any(func => func == systemDataCollector)) threadFuncs = threadFuncs.Prepend(systemDataCollector).ToArray();
 
             exitEvent = new ManualResetEvent(false);
 
