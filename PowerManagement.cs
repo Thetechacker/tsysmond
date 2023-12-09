@@ -1,7 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security;
-using System.Diagnostics;
 
 // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-exitwindowsex
 
