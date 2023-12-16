@@ -81,12 +81,12 @@ namespace TexSystemMonitor
         }
     }
 
-    struct RegistryDefaultValue
+    struct RegistryEntry
     {
         public string Name;
         public RegistryValueKind Kind;
         public object DefaultValue;
-        public Func<object, object> ValueChecker;
+        public Func<RegistryEntry, object, object> ValueChecker;
     }
 
     class Program
@@ -106,11 +106,7 @@ namespace TexSystemMonitor
 
         public const int CPU_TEMPERATURE_POLLING_RATE_MS = 1000;
 
-        public const uint SAFE_CPU_TEMPERATURE_CELSIUS = 65;
-        public const uint CRITICAL_CPU_TEMPERATURE_CELSIUS = 80;
-        public const uint DANGEROUS_CPU_TEMPERATURE_CELSIUS = 85;
-
-        public static Func<threadfn>[] threadFuncs = new Func<threadfn>[] { cpuTempSafetyMeasure, powerSupplySwitchAlerter };
+        public static Func<threadfn>[] threadFuncs = null;
 
         public const string optionArgumentPrefix = "--";
         public static readonly string[] optionArguments = { "console", "collectSystemData" };
@@ -118,11 +114,30 @@ namespace TexSystemMonitor
         public static DateTime? daemonStartedAt = null;
 
         public static RegistryKey registry = null;
-        public static Dictionary<string, object> registryValuesSnapshot = null;
+        public static Dictionary<string, object> registryEntriesSnapshot = null;
 
-        public static readonly RegistryDefaultValue[] registryDefaultValues = {
-            new RegistryDefaultValue { Name = "CPUTempSafeStartup", Kind = RegistryValueKind.DWord, DefaultValue = 0x00000000, ValueChecker = null },
-            new RegistryDefaultValue { Name = "SystemDataColFileLocation", Kind = RegistryValueKind.String, DefaultValue = @"C:\Tex\systemDataCol.txt", ValueChecker = null }
+        public static readonly RegistryEntry[] registryEntries = {
+            new RegistryEntry { Name = "THREAD_cpuTempSafetyMeasure", Kind = RegistryValueKind.DWord, DefaultValue = 0x00000001, ValueChecker = null },
+            new RegistryEntry { Name = "THREAD_powerSupplySwitchNotifier", Kind = RegistryValueKind.DWord, DefaultValue = 0x00000001, ValueChecker = null },
+            new RegistryEntry { Name = "CPUTempSafeStartup", Kind = RegistryValueKind.DWord, DefaultValue = 0x00000000, ValueChecker = null },
+            new RegistryEntry { Name = "SystemDataColFileLocation", Kind = RegistryValueKind.String, DefaultValue = @"C:\Tex\systemDataCol.txt", ValueChecker = null },
+            new RegistryEntry { Name = "CPUDangerousTempCelsius", Kind = RegistryValueKind.DWord, DefaultValue = 85, ValueChecker = ((thisStruct, v) => {
+                uint value = Convert.ToUInt32(v);
+
+                return ((value > 120) ? thisStruct.DefaultValue : null);
+            }) },
+            new RegistryEntry { Name = "CPUCriticalTempCelsius", Kind = RegistryValueKind.DWord, DefaultValue = 80, ValueChecker = ((_, v) => {
+                uint value = Convert.ToUInt32(v);
+                uint temp = Convert.ToUInt32(registryEntriesSnapshot["CPUDangerousTempCelsius"]);
+
+                return ((value >= temp) ? (object)(temp - 5) : null);
+            }) },
+            new RegistryEntry { Name = "CPUSafeTempCelsius", Kind = RegistryValueKind.DWord, DefaultValue = 65, ValueChecker = ((_, v) => {
+                uint value = Convert.ToUInt32(v);
+                uint temp = Convert.ToUInt32(registryEntriesSnapshot["CPUCriticalTempCelsius"]);
+
+                return ((value >= temp) ? (object)(temp - 15) : null);
+            }) }
         };
 
         public static ManualResetEvent exitEvent = null;
@@ -168,6 +183,11 @@ namespace TexSystemMonitor
             string THREAD_NAME = MethodBase.GetCurrentMethod().Name;
 
             Computer computer = new Computer();
+
+            uint DANGEROUS_CPU_TEMPERATURE_CELSIUS = Convert.ToUInt32(registryEntriesSnapshot["CPUDangerousTempCelsius"]);
+            uint CRITICAL_CPU_TEMPERATURE_CELSIUS = Convert.ToUInt32(registryEntriesSnapshot["CPUCriticalTempCelsius"]);
+            uint SAFE_CPU_TEMPERATURE_CELSIUS = Convert.ToUInt32(registryEntriesSnapshot["CPUSafeTempCelsius"]);
+
             bool notifiedCriticalTemperature = false;
             bool noSensors = false;
             bool safeStartupChecked = false;
@@ -211,13 +231,13 @@ namespace TexSystemMonitor
                     goto exitWhile;
                 }
 
-                if (!safeStartupChecked && ((uint)(int)registryValuesSnapshot["CPUTempSafeStartup"] > 0))
+                if (!safeStartupChecked && Convert.ToBoolean(registryEntriesSnapshot["CPUTempSafeStartup"]))
                 {
                     if (maxTemp <= SAFE_CPU_TEMPERATURE_CELSIUS)
                     {
                         try
                         {
-                            registry.SetValue("CPUTempSafeStartup", 0x00000000);
+                            registry.SetValue("CPUTempSafeStartup", 0x00000000, RegistryValueKind.DWord);
                         }
                         catch (Exception exc)
                         {
@@ -245,7 +265,7 @@ namespace TexSystemMonitor
 
                     try
                     {
-                        registry.SetValue("CPUTempSafeStartup", 0xFFFFFFFF);
+                        registry.SetValue("CPUTempSafeStartup", 0xFFFFFFFF, RegistryValueKind.DWord);
                     } catch(Exception exc)
                     {
                         sendNotification(DAEMON_NAME, $"Couldn't manage the registry: \"{exc.Message}\"", THREAD_NAME, true);
@@ -285,7 +305,7 @@ namespace TexSystemMonitor
             return 0;
         }
 
-        public static threadfn powerSupplySwitchAlerter()
+        public static threadfn powerSupplySwitchNotifier()
         {
             string THREAD_NAME = MethodBase.GetCurrentMethod().Name;
 
@@ -321,17 +341,21 @@ namespace TexSystemMonitor
         {
             string THREAD_NAME = MethodBase.GetCurrentMethod().Name;
 
-            if (!createMissingDirectories((string)registryValuesSnapshot["SystemDataColFileLocation"]))
+            string SYSTEM_DATA_COL_FILE_LOCATION = Convert.ToString(registryEntriesSnapshot["SystemDataColFileLocation"]);
+
+            bool alreadyExistsSystemDataColFile = File.Exists(SYSTEM_DATA_COL_FILE_LOCATION);
+
+            if (!alreadyExistsSystemDataColFile && !createMissingDirectories(SYSTEM_DATA_COL_FILE_LOCATION))
             {
-                sendNotification(DAEMON_NAME, $"Couldn't create the missing directories for the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"", THREAD_NAME, true);
+                sendNotification(DAEMON_NAME, $"Couldn't create the missing directories for the system data collection file: \"{SYSTEM_DATA_COL_FILE_LOCATION}\"", THREAD_NAME, true);
             }
 
             try
             {
-                File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
+                File.AppendAllText(SYSTEM_DATA_COL_FILE_LOCATION, ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
             } catch(Exception exc)
             {
-                sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"", THREAD_NAME, true);
+                sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{SYSTEM_DATA_COL_FILE_LOCATION}\"\n\"{exc.Message}\"", THREAD_NAME, true);
 
                 return 0;
             }
@@ -343,17 +367,24 @@ namespace TexSystemMonitor
             eventLog.Log = "System";
             eventLog.MachineName = Environment.MachineName;
 
-            // string prevEntries = "[Events\\]\n" + String.Join("\n", eventLog.Entries.Cast<EventLogEntry>().Where(entry => entry.Source == interestedSource).Select(entry => $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"")) + "\n[Events/]";
 
-            // try
-            // {
-            //     File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], prevEntries);
-            // } catch(Exception exc)
-            // {
-            //     sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"", THREAD_NAME, true);
+            if (!alreadyExistsSystemDataColFile)
+            {
+                string prevEntries = "[Events/]\n" + String.Join("\n", eventLog.Entries.Cast<EventLogEntry>().Where(entry => entry.Source == interestedSource).Select(entry => $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"")) + "\n[Events\\]\n";
 
-            //     return 0;
-            // }
+                try
+                {
+                    File.AppendAllText(SYSTEM_DATA_COL_FILE_LOCATION, prevEntries);
+                }
+                catch (Exception exc)
+                {
+                    sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{SYSTEM_DATA_COL_FILE_LOCATION}\"\n\"{exc.Message}\"", THREAD_NAME, true);
+
+                    eventLog.Close();
+
+                    return 0;
+                }
+            }
 
             eventLog.Source = interestedSource;
 
@@ -362,14 +393,16 @@ namespace TexSystemMonitor
             EntryWrittenEventHandler eventEntryHandler = (object sender, EntryWrittenEventArgs e) => {
                 EventLogEntry entry = e.Entry;
 
+                if (entry.Source != interestedSource) return;
+
                 try
                 {
-                    if(!File.Exists((string)registryValuesSnapshot["SystemDataColFileLocation"])) File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
+                    if(!File.Exists(SYSTEM_DATA_COL_FILE_LOCATION)) File.AppendAllText(SYSTEM_DATA_COL_FILE_LOCATION, ("{daemonStartedAt: " + daemonStartedAt + "}\n"));
 
-                    File.AppendAllText((string)registryValuesSnapshot["SystemDataColFileLocation"], $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"\n");
+                    File.AppendAllText(SYSTEM_DATA_COL_FILE_LOCATION, $"[Event]\nSource: {entry.Source}\nType: {entry.EntryType}\nGenerated at: {entry.TimeGenerated}\nID: {entry.InstanceId}\nMessage: \"{entry.Message}\"\n");
                 } catch(Exception exc)
                 {
-                    sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{(string)registryValuesSnapshot["SystemDataColFileLocation"]}\"\n\"{exc.Message}\"\nPerpetually suspending thread...", THREAD_NAME, true);
+                    sendNotification(DAEMON_NAME, $"Couldn't write or append data to the system data collection file: \"{SYSTEM_DATA_COL_FILE_LOCATION}\"\n\"{exc.Message}\"\nPerpetually suspending thread...", THREAD_NAME, true);
 
                     suspensionCleanup = true;
 
@@ -462,9 +495,9 @@ namespace TexSystemMonitor
                 goto mainExit;
             }
 
-            registryValuesSnapshot = new Dictionary<string, object>();
+            registryEntriesSnapshot = new Dictionary<string, object>();
 
-            foreach(RegistryDefaultValue regDefValue in registryDefaultValues)
+            foreach(RegistryEntry regDefValue in registryEntries)
             {
                 object value = null;
                 RegistryValueKind? valueKind = null;
@@ -489,16 +522,18 @@ namespace TexSystemMonitor
 
                     try
                     {
-                        registry.SetValue(regDefValue.Name, value);
+                        registry.SetValue(regDefValue.Name, value, regDefValue.Kind);
                     } catch(Exception exc)
                     {
                         registryException = exc;
 
                         goto registryException;
                     }
-                } else if(regDefValue.ValueChecker != null)
+                }
+                
+                if(regDefValue.ValueChecker != null)
                 {
-                    object tempValue = regDefValue.ValueChecker(value);
+                    object tempValue = regDefValue.ValueChecker(regDefValue, value);
 
                     if(tempValue != null)
                     {
@@ -506,7 +541,7 @@ namespace TexSystemMonitor
 
                         try
                         {
-                            registry.SetValue(regDefValue.Name, value);
+                            registry.SetValue(regDefValue.Name, value, regDefValue.Kind);
                         }
                         catch (Exception exc)
                         {
@@ -517,7 +552,7 @@ namespace TexSystemMonitor
                     }
                 }
 
-                registryValuesSnapshot.Add(regDefValue.Name, value);
+                registryEntriesSnapshot.Add(regDefValue.Name, value);
 
             registryException:
                 if (registryException != null)
@@ -528,9 +563,20 @@ namespace TexSystemMonitor
                 }
             }
 
+            if (threadFuncs == null) threadFuncs = new Func<threadfn>[0];
+
             bool collectSystemData = args.Any(argument => argument == (optionArgumentPrefix + "collectSystemData"));
 
             if (collectSystemData && !threadFuncs.Any(func => func == systemDataCollector)) threadFuncs = threadFuncs.Prepend(systemDataCollector).ToArray();
+            if (Convert.ToBoolean(registryEntriesSnapshot["THREAD_cpuTempSafetyMeasure"]) && !threadFuncs.Any(func => func == cpuTempSafetyMeasure)) threadFuncs = threadFuncs.Append(cpuTempSafetyMeasure).ToArray();
+            if (Convert.ToBoolean(registryEntriesSnapshot["THREAD_powerSupplySwitchNotifier"]) && !threadFuncs.Any(func => func == powerSupplySwitchNotifier)) threadFuncs = threadFuncs.Append(powerSupplySwitchNotifier).ToArray();
+
+            if((threadFuncs.Length - (collectSystemData ? 1 : 0)) <= 0)
+            {
+                sendNotification(DAEMON_NAME, "No threads to run, exiting from Main() function.", displayDateTime: true);
+
+                goto mutexExit;
+            }
 
             exitEvent = new ManualResetEvent(false);
 
